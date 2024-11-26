@@ -5,40 +5,34 @@
   let retryAttempts = 0
   let discoveredNew = 0
   const MAX_RETRY_ATTEMPTS = 5
-  let questionsAnswered = 0 // Compteur de questions répondues
-  let currentTotalScore = 0 // Score total actuel
-  let accumulatedDifference = 0 // Écart accumulé
+  let questionsAnswered = 0
+  let currentTotalScore = 0
+  let accumulatedDifference = 0
   let scriptRestart = 0
+  let timePerQuestion = 0 
 
-  // Demander le délai entre chaque question à l'utilisateur
   function approxValue(x) {
     const xData = [1000000, 1670, 1550, 1500, 1360, 1205, 1135, 1075, 1025, 975, 940, 900, 870, 835, 805, 640, 555, 500, 450, 400, 350, 300, 250, 200, 150, 100, 50, 0]
     const yData = [0, 0, 40, 60, 200, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000]
 
-    if (x >= xData[0]) {
-      return yData[0]
-    } else if (x <= xData[xData.length - 1]) {
-      return yData[yData.length - 1]
-    } else {
-      for (let i = 1; i < xData.length; i++) {
-        if (x <= xData[i - 1] && x >= xData[i]) {
-          const x0 = xData[i]
-          const x1 = xData[i - 1]
-          const y0 = yData[i]
-          const y1 = yData[i - 1]
-          return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0)
-        }
+    if (x >= xData[0]) return yData[0]
+    if (x <= xData[xData.length - 1]) return yData[yData.length - 1]
+
+    for (let i = 1; i < xData.length; i++) {
+      if (x <= xData[i - 1] && x >= xData[i]) {
+        const x0 = xData[i]
+        const x1 = xData[i - 1]
+        const y0 = yData[i]
+        const y1 = yData[i - 1]
+        return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0)
       }
     }
-    return null // Au cas où x ne serait pas dans la plage des données
+    return null
   }
 
   let scorecible = parseInt(prompt('Please enter your goal score:'), 10)
   if (scorecible > 1550) {
-    alert(
-      '⚠️ WARNING ⚠️ A score above 1550 is not recommended. Lucca may ban people who score too high. This program can give you a score of 1670, but Lucca might ban you if your score exceeds 1550 or 1600. With this program, there is a margin of error of 20 points, so you could end up with a score of 1560 or 1570, which might lead to a ban. Please be cautious.'
-    )
-    // ask the user to confirm that he is aware of the risks
+    alert('⚠️ WARNING ⚠️ A score above 1550 is not recommended. Lucca may ban people who score too high.')
     const confirmation = confirm('You could be banned for 1 month from lucca face if you score too high. Are you sure you want to continue?')
     if (!confirmation) {
       console.log('User canceled the operation.')
@@ -46,22 +40,22 @@
     }
   }
 
+  timePerQuestion = approxValue(scorecible)
+  if (timePerQuestion === null) {
+    console.error('Score cible invalide. Veuillez entrer un score cible entre 555 et 1670.')
+    return
+  }
+
   function getTotalPointsFromHeaderText(headerText) {
     const regex = /(\d+) pts/
     const match = headerText.match(regex)
-    if (match && match.length > 1) {
-      return parseInt(match[1], 10)
-    }
-    return 0
+    return match && match.length > 1 ? parseInt(match[1], 10) : 0
   }
 
   function getPointsFromSpanText(spanText) {
     const regex = /\+ (\d+) pts/
     const match = spanText.match(regex)
-    if (match && match.length > 1) {
-      return parseInt(match[1], 10)
-    }
-    return 0
+    return match && match.length > 1 ? parseInt(match[1], 10) : 0
   }
 
   function getImageHash(imageSrc) {
@@ -73,7 +67,7 @@
         const ctx = canvas.getContext('2d')
         canvas.width = img.width
         canvas.height = img.height
-        ctx.drawImage(img, 0, 0, img.width, img.height)
+        ctx.drawImage(img, 0, 0)
         canvas.toBlob((blob) => {
           const reader = new FileReader()
           reader.onloadend = () => {
@@ -87,9 +81,7 @@
           reader.readAsArrayBuffer(blob)
         })
       }
-      img.onerror = () => {
-        reject('Image load error')
-      }
+      img.onerror = reject
       img.src = imageSrc
     })
   }
@@ -121,41 +113,23 @@
               .then((choices) => {
                 const correctAnswer = [...choices].find((choice) => choice.textContent.trim() === people[currentImageHash].trim())
                 if (correctAnswer) {
+                  console.log(`Found known person: ${people[currentImageHash]}, clicking after ${timePerQuestion}ms...`)
                   setTimeout(() => {
                     correctAnswer.click()
-                    // Polling pour observer les changements dans l'élément qui affiche le score gagné
                     pollForScoreElement((pointsEarned) => {
                       questionsAnswered++
-                      currentTotalScore += pointsEarned // Ajouter le score actuel au score total
+                      currentTotalScore += pointsEarned
 
-                      // Calcul du score total visé
-                      const totalTargetScore = scorecible
-
-                      // Estimer le nombre de questions restantes
                       const questionsRemaining = 10 - questionsAnswered
-
-                      // Calculer l'écart accumulé
-                      accumulatedDifference = totalTargetScore - currentTotalScore
-
-                      // Calculer le score visé pour la prochaine question
+                      accumulatedDifference = scorecible - currentTotalScore
                       const scoreNeededForNextQuestion = questionsRemaining > 0 ? Math.ceil(accumulatedDifference / questionsRemaining) : 0
-
-                      // Calculer le nouveau délai en utilisant approxValue
-                      const scoreForApproxValue = scoreNeededForNextQuestion * 10 // Score total pour 10 questions
+                      const scoreForApproxValue = scoreNeededForNextQuestion * 10
                       const newDelay = approxValue(scoreForApproxValue)
 
-                      console.log(`${questionsAnswered}/10: ${people[currentImageHash]}, for ${pointsEarned}pts. Total : ${currentTotalScore}`)
-                      if (timePerQuestion != newDelay && questionsAnswered < 10 && discoveredNew === 0) {
+                      console.log(`${questionsAnswered}/10: ${people[currentImageHash]}, for ${pointsEarned}pts. Total: ${currentTotalScore}`)
+                      if (timePerQuestion !== newDelay && questionsAnswered < 10 && discoveredNew === 0) {
                         console.log('   --> ADAPTING! Requested points for next question:', scoreNeededForNextQuestion)
-                        if ((scoreNeededForNextQuestion - scorecible / 10).toFixed(0) === 0) {
-                          console.log(
-                            `   --> Delay for next question is now: ${newDelay.toFixed(1)}ms to get ${(scoreNeededForNextQuestion - scorecible / 10).toFixed(0)} more pts !`
-                          )
-                        } else {
-                          console.log(
-                            `   --> Delay for next question is now: ${newDelay.toFixed(1)}ms to get ${(scoreNeededForNextQuestion - scorecible / 10).toFixed(1)} more pts !`
-                          )
-                        }
+                        console.log(`   --> Delay for next question is now: ${newDelay.toFixed(1)}ms`)
                         timePerQuestion = newDelay
                       }
 
@@ -166,7 +140,7 @@
                             const newImageSrc = newImageElement.style.backgroundImage.match(/url\("(.*)"\)/)[1]
                             handleNewImage(newImageSrc)
                           }
-                        }, newDelay) // Utiliser le nouveau délai ici
+                        }, newDelay)
                       } else {
                         gameCompleted()
                       }
@@ -189,41 +163,34 @@
       })
       .catch((error) => {
         if (questionsAnswered < 10) {
-          // Éviter d'entrer dans ce bloc si le jeu est terminé
           console.error('Error processing image:', error)
           retryAttempts++
           if (retryAttempts <= MAX_RETRY_ATTEMPTS) {
             console.log(`Retrying (${retryAttempts}/${MAX_RETRY_ATTEMPTS})...`)
-            retryHandleImage(imageSrc)
+            setTimeout(() => handleNewImage(imageSrc), 100)
           } else {
             console.log('Max retry attempts reached. Skipping image.')
             retryAttempts = 0
-            clickGoButton()
           }
         }
       })
   }
+
   function pollForScoreElement(callback) {
     const interval = setInterval(() => {
       const imageOverlayElement = document.querySelector('.image-container .image-overlay span.score')
       if (imageOverlayElement) {
         clearInterval(interval)
         const pointsEarned = getPointsFromSpanText(imageOverlayElement.textContent)
-        const currentTotalScore = getTotalPointsFromHeaderText(document.querySelector('.score-header .score').textContent)
-        callback(pointsEarned, currentTotalScore)
+        callback(pointsEarned)
       }
     }, 100)
-  }
-
-  function retryHandleImage(imageSrc) {
-    setTimeout(() => handleNewImage(imageSrc), 100)
   }
 
   function chooseRandomAnswer() {
     ensureChoicesLoaded()
       .then((choices) => {
         const randomChoice = choices[Math.floor(Math.random() * choices.length)]
-        // random time between 0.5 and 1.5 seconds before clicking the random choice
         const randomTime = Math.floor(Math.random() * 1000) + 500
         setTimeout(() => randomChoice.click(), randomTime)
         setTimeout(() => {
@@ -233,7 +200,6 @@
             people[currentImageHash] = name
             localStorage.setItem(STORAGE_KEY, JSON.stringify(people))
             questionsAnswered++
-
             console.log(` NEW PERSON --> Discovered ${name} for hash ${currentImageHash}`)
           } else {
             console.error('Failed to discover the correct answer!')
@@ -263,97 +229,114 @@
   }
 
   function startGame() {
-    const startButtonContainer = document.querySelector('.main-container.has-loaded .logo .rotation-loader')
-    if (startButtonContainer) {
-      startButtonContainer.click()
-      console.clear()
-
-      console.log(`
-      ██╗ ██████╗
-      ██║██╔═══██╗
-      ██║██║   ██║
- ██   ██║██║   ██║
- ╚█████╔╝╚██████╔╝
-  ╚════╝  ╚═════╝
-    `)
-      console.log('')
-
-      if (scriptRestart > 0) {
-        console.log('People not known in last play, script has been restarted.')
-        console.log('Script restart count:', scriptRestart)
-      }
-      console.log('Known people:', Object.keys(people).length)
-      console.log('Target score:', scorecible)
-
-      timePerQuestion = approxValue(scorecible)
-
-      if (timePerQuestion === null) {
-        console.error('Score cible invalide. Veuillez entrer un score cible entre 555 et 1670.')
-        return
-      }
-
-      console.log(`Initial calculated delay : ${timePerQuestion.toFixed(1)} ms for ~${(scorecible / 10).toFixed(0)}pts per question`)
-      console.log('')
-    } else {
-      if (window.location.pathname !== '/faces/game') {
-        console.error('You are not on the game page. Make sure you are on /faces/game')
-        return
-      }
-      console.error('Start button not found. Make sure the game is loaded and you see the Go button.')
+    const goButton = document.querySelector('button.rotation-loader')
+    if (goButton) {
+      console.log('Starting game...')
+      // On configure d'abord un observateur pour le document entier
+      const documentObserver = new MutationObserver(() => {
+        const gameElement = document.querySelector('#game')
+        if (gameElement) {
+          console.log('Game element detected, setting up game observer...')
+          documentObserver.disconnect()
+          setupGameObserver()
+        }
+      })
+      
+      // Observer le document pour détecter quand le jeu apparaît
+      documentObserver.observe(document.body, { childList: true, subtree: true })
+      
+      // Cliquer sur Go
+      goButton.click()
     }
   }
 
   function restartGame() {
-    const replayButton = document.querySelector('.button.mod-pill.palette-secondary.mod-XL')
-    // wait a random time between 0 and 2 seconds before clicking the replay button
-    console.log('Restarting the game...')
-    const randomTime = Math.floor(Math.random() * 2000) + 500
-    setTimeout(() => {
-      if (replayButton) {
-        replayButton.click()
-        // wait a random time between 0.5 and 2 seconds before pasting the script again
-        const randomTime = Math.floor(Math.random() * 2500) + 1000
-        setTimeout(() => {
-          people = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}
-          currentImageHash = ''
-          retryAttempts = 0
+    const replayButton = document.querySelector('button.button.palette-primary.palette-none.is-default')
+    if (replayButton && replayButton.textContent.trim() === 'Rejouer') {
+      console.log('Restarting game...')
+      replayButton.click()
+      
+      setTimeout(() => {
+        const goButton = document.querySelector('button.rotation-loader')
+        if (goButton) {
+          // Réinitialiser les variables pour la nouvelle partie
+          questionsAnswered = 0
+          currentTotalScore = 0
+          accumulatedDifference = 0
           discoveredNew = 0
-          questionsAnswered = 0 // Compteur de questions répondues
-          currentTotalScore = 0 // Score total actuel
-          accumulatedDifference = 0 // Écart accumulé
-          scriptRestart++
-          console.clear()
-          main()
-        }, randomTime)
-      } else {
-        // wait a random time between 0.5 and 2 seconds before pasting the script again
-        const randomTime = Math.floor(Math.random() * 1500) + 500
-        console.log('Restart button not found. Trying again in', randomTime, 'ms')
-        setTimeout(() => {
-          restartGame()
-        }, randomTime)
-      }
-    }, randomTime)
+          currentImageHash = ''
+          
+          // Même approche que startGame
+          const documentObserver = new MutationObserver(() => {
+            const gameElement = document.querySelector('#game')
+            if (gameElement) {
+              console.log('Game element detected after restart, setting up game observer...')
+              documentObserver.disconnect()
+              setupGameObserver()
+            }
+          })
+          
+          documentObserver.observe(document.body, { childList: true, subtree: true })
+          
+          console.log('Clicking Go for new game...')
+          goButton.click()
+        }
+      }, 2000)
+    }
   }
 
-  function observeGame() {
+  let gameObserver = null
+
+  function setupGameObserver() {
+    // Déconnecter l'ancien observateur s'il existe
+    if (gameObserver) {
+      gameObserver.disconnect()
+      gameObserver = null
+    }
+
     const gameElement = document.querySelector('#game')
     if (!gameElement) {
+      console.error('Game element not found in setupGameObserver!')
       return
     }
-    const observer = new MutationObserver(() => {
+    
+    console.log('Setting up game observer...')
+    gameObserver = new MutationObserver(() => {
       const imageElement = document.querySelector('#game app-timer .image')
       if (imageElement) {
         const imageSrc = imageElement.style.backgroundImage.match(/url\("(.*)"\)/)[1]
-        handleNewImage(imageSrc)
+        if (imageSrc) {
+          console.log('New image detected, handling...')
+          handleNewImage(imageSrc)
+        }
       }
     })
-    observer.observe(gameElement, { childList: true, subtree: true })
+    
+    gameObserver.observe(gameElement, { childList: true, subtree: true })
+    console.log('Game observer setup complete')
+    
+    // Vérifier immédiatement s'il y a déjà une image
+    const imageElement = document.querySelector('#game app-timer .image')
+    if (imageElement) {
+      const imageSrc = imageElement.style.backgroundImage.match(/url\("(.*)"\)/)[1]
+      if (imageSrc) {
+        console.log('Initial image found, handling...')
+        handleNewImage(imageSrc)
+      }
+    }
   }
 
   function main() {
+    const goButton = document.querySelector('button.rotation-loader')
+    if (!goButton) {
+      alert("Vous devez commencer à mettre ce script quand vous êtes sur la page 'Go à toi de jouer' de Lucca Faces")
+      return
+    }
+
+    console.log(`Initial calculated delay: ${timePerQuestion.toFixed(1)}ms for ~${(scorecible / 10).toFixed(0)}pts per question`)
     startGame()
-    observeGame()
+    setInterval(restartGame, 1000)
   }
+
   main()
 })()
